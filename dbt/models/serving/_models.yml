@@ -26,10 +26,13 @@ models:
   # ---------------------------------------------------------------------------------------
   - name: srv_system_health
     description: >
-      System Overview page. One row per health signal, unioned from five sources —
-      endpoint freshness, dbt test outcomes, API quota, documentation coverage and deploy
-      drift — so the page can answer "is anything wrong" without knowing what any individual
-      signal means. Airflow run history is deliberately excluded: task outcomes belong in
+      System Overview page. One row per health signal, unioned from seven sources —
+      endpoint freshness, dbt test outcomes, API quota, documentation coverage, deploy
+      drift, pipeline cadence and market integrity — so the page can answer "is anything
+      wrong" without knowing what any individual signal means. ⚠️ THIS SAID "five sources"
+      AND NAMED FIVE UNTIL A291 (§3.2.3 — a description is a claim and it ships into the
+      data dictionary a reader can open): `pipeline` and `market_integrity` had been added
+      without the prose following them. Airflow run history is deliberately excluded: task outcomes belong in
       Airflow's own UI, and this board is about data rather than the scheduler.
       Postgres-only (tag `postgres_only`); it reads M4D's own telemetry, which has no
       Databricks equivalent.
@@ -39,7 +42,9 @@ models:
       - name: signal_type
         description: >
           Which family the signal came from: `freshness`, `data_quality`, `quota`,
-          `documentation` or `deployment`. Determines how `subject` and `detail` read.
+          `documentation`, `deployment`, `pipeline` or `market_integrity`. Determines how
+          `subject` and `detail` read. `ci/check_health_signals.py` parses this model's own
+          select list for the authoritative set rather than trusting this sentence.
       - name: subject
         description: >
           What the signal is about, and its meaning depends on `signal_type` — an endpoint
@@ -48,8 +53,11 @@ models:
       - name: severity
         description: >
           `ok`, `warn`, `error`, or `unknown`. Assigned here rather than in the app so the
-          page can sort by urgency without embedding any thresholds. `unknown` is used only
-          for quota rows where the vendor publishes no limit, so no percentage can be honest.
+          page can sort by urgency without embedding any thresholds. `unknown` means "no
+          honest verdict is available": a quota row where the vendor publishes no limit, or
+          a deploy-tree observation too old to be evidence. ⚠️ THIS SAID "used only for
+          quota rows" UNTIL A291; A290 gave the `deployment` signal the same word and the
+          description did not follow (§3.2.3).
       - name: detail
         description: >
           One human-readable sentence explaining the severity, pre-formatted for display —
@@ -59,6 +67,14 @@ models:
           When the underlying signal was measured. Null for documentation rows, which are
           computed from the live catalog at build time and so have no observation instant
           distinct from the build itself.
+      - name: verdict_computed_at
+        description: >
+          A291 (cfdb-main-R-5043). When this row's `severity` and `detail` were computed.
+          Every severity in this model is derived from `now()` at build time and this is a
+          TABLE, so the verdict is a snapshot rather than a live reading — and because the
+          board is rebuilt only by the weekly catalog step, a verdict about a five-hour
+          cadence can be three days old. Published so the page can state the verdict's own
+          age; the judgement stays in the model and only the age rendering is in the app.
       - name: as_of_ts
         description: >
           AC-G.35. When this view's underlying data was last loaded, for the `ops` domain.
