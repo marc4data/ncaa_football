@@ -44,6 +44,16 @@ CADENCES = {
 
 SSH_TIMEOUT_SECONDS = 60
 
+# Which DAG produces each heartbeat, so a stale beat can be asked about its own cadence's runs.
+# `test_every_cadence_names_the_dag_that_beats_it` holds this equal to the DAG files.
+HEARTBEAT_DAG = {
+    "scores_refresh": "cfbd_scores_refresh",
+    "lines_snapshot": "cfbd_lines_snapshot",
+    "weekly_results": "cfbd_results_refresh",
+    "weekly_pregame": "cfbd_pregame_refresh",
+    "weekly_midweek": "cfbd_midweek_results",
+}
+
 
 # ── THE OUTCOME LINES: what the site is missing, as opposed to what the pipeline did ───────
 #
@@ -104,14 +114,40 @@ def read_ages(host: str) -> dict:
     return parse_payload(fetch_payload(host))
 
 
+class Reading(tuple):
+    """`(ages, failures, failed_tests, outcomes)`, plus `.runs` — each DAG's recent runs.
+
+    ⚠️ A TUPLE WITH AN ATTRIBUTE, NOT A FIFTH ELEMENT: the gate and the tests unpack exactly
+    four, and `.runs` defaults to empty so a caller supplying a plain tuple reads as "the
+    tense is unknown" rather than crashing.
+    """
+    runs: dict = {}
+
+
+def _seconds_or_none(field: str):
+    return None if field.strip() == "-" else int(field)
+
+
 def parse_payload(text: str) -> tuple:
-    """`(ages, failures, failed_tests, outcomes)` from the forced command's output."""
-    ages, failures, failed_tests, outcomes = {}, {}, {}, {}
+    """A `Reading` of the forced command's output."""
+    ages, failures, failed_tests, outcomes, runs = {}, {}, {}, {}, {}
     for line in text.splitlines():
         line = line.strip()
         if not line or "|" not in line:
             continue
         head, _, rest = line.partition("|")
+        # `dag_run|<dag>|<since success>|<since finished>|<in flight>|<until next>` — A293.
+        if head.strip() == "dag_run":
+            fields = rest.split("|")
+            if len(fields) == 5 and not fields[0].startswith("MONITOR."):
+                try:
+                    runs[fields[0].strip()] = (_seconds_or_none(fields[1]),
+                                               _seconds_or_none(fields[2]),
+                                               fields[3].strip() == "1",
+                                               _seconds_or_none(fields[4]))
+                except ValueError:
+                    pass
+            continue
         # 🚨 `failed_test|<name>|<failures>|<seconds ago>` — R-412's payload, WHICH NOTHING READ
         # UNTIL R-698. cfdb_heartbeat.sh has emitted this line since R-412 so that an alert could
         # name the ASSERTION instead of only the task. This parser knew two shapes and not this
@@ -183,7 +219,9 @@ def parse_payload(text: str) -> tuple:
             ages[head.strip()] = int(rest)
         except ValueError:
             continue
-    return ages, failures, failed_tests, outcomes
+    reading = Reading((ages, failures, failed_tests, outcomes))
+    reading.runs = runs
+    return reading
 
 
 def describe(seconds: int) -> str:
@@ -194,15 +232,63 @@ def describe(seconds: int) -> str:
     return f"{seconds // 86400}d {(seconds % 86400) // 3600}h"
 
 
+# ── THE TENSE (A293, cfdb-main-R-5104) ─────────────────────────────────────────────────────
+#
+# > **MARC:** *"still have the dead mans switch error … This happens weekly."*
+#
+# Every message was accurate and none said whether the fault was live. These only ADD words:
+# what pages is unchanged, because the fix is tense, not volume.
+#
+# ⚠️ BOTH COMPARE A RUN'S **START** AGE TO THE EVENT'S AGE. A smaller age is more recent, so
+# `started < event` means the run began after the event — see the note in cfdb_heartbeat.sh on
+# why an end time would match the very run that failed.
+
+def _next_chance(until_next) -> str:
+    return "no next run is scheduled" if until_next is None else (
+        f"next scheduled in {describe(until_next)}")
+
+
+def failure_tense(task: str, age: int, runs: dict) -> str:
+    """Has this task's cadence succeeded, tried again, or not run since this failure?"""
+    run = runs.get(task.partition(".")[0])
+    if run is None:
+        return "whether its cadence has run since is unknown"
+    success, finished, in_flight, until_next = run
+    if success is not None and success < age:
+        return f"its cadence SUCCEEDED SINCE, in a run started {describe(success)} ago"
+    if finished is not None and finished < age:
+        return (f"STILL FAILING: its cadence ran again, started {describe(finished)} ago, and "
+                f"did not succeed; {_next_chance(until_next)}")
+    if in_flight:
+        return "NOT YET RECOVERED: a run of its cadence is in progress"
+    return f"its cadence HAS NOT RUN SINCE; {_next_chance(until_next)}"
+
+
+def stale_tense(name: str, age: int, runs: dict) -> str:
+    """Has this over-budget cadence had an opportunity to beat since its last beat?"""
+    run = runs.get(HEARTBEAT_DAG.get(name, ""))
+    if run is None:
+        return "whether it has had a chance to run since is unknown"
+    _success, finished, in_flight, until_next = run
+    if in_flight:
+        return "a run is in progress now"
+    if finished is not None and finished < age:
+        return (f"it HAS HAD A CHANCE and did not beat: the latest run started "
+                f"{describe(finished)} ago; {_next_chance(until_next)}")
+    return f"it HAS HAD NO CHANCE to recover, no run since that beat; {_next_chance(until_next)}"
+
+
 def main(argv=None) -> int:
     host = (argv or sys.argv[1:] or ["cfdb_monitor@localhost"])[0]
 
     try:
-        ages, failures, failed_tests, outcomes = read_ages(host)
+        reading = read_ages(host)
     except Exception as error:                                           # noqa: BLE001
         # THE DROPLET BEING UNREACHABLE IS THE ALARM, not a reason to exit quietly.
         print(f"::error::the pipeline host is unreachable — {error}")
         return 1
+    ages, failures, failed_tests, outcomes = reading
+    runs = getattr(reading, "runs", {})
 
     stale, missing, ok = [], [], []
     for name, (cadence, budget) in sorted(CADENCES.items()):
@@ -210,8 +296,11 @@ def main(argv=None) -> int:
             missing.append(f"{name} ({cadence}): NEVER BEAT")
             continue
         age = ages[name]
-        (ok if age <= budget else stale).append(
-            f"{name} ({cadence}): last beat {describe(age)} ago, budget {describe(budget)}")
+        line = f"{name} ({cadence}): last beat {describe(age)} ago, budget {describe(budget)}"
+        if age <= budget:
+            ok.append(line)
+        else:
+            stale.append(f"{line} — {stale_tense(name, age, runs)}")
 
     for line in ok:
         print(f"  ok      {line}")
@@ -231,12 +320,14 @@ def main(argv=None) -> int:
     # rather than a note because a failed task in a gated pipeline is not a transient: the
     # DAG has already exhausted its own retries by the time this sees it.
     for task, age in sorted(failures.items()):
-        print(f"  FAILED  {task}: last failed {describe(age)} ago")
+        print(f"  FAILED  {task}: last failed {describe(age)} ago — "
+              f"{failure_tense(task, age, runs)}")
 
     # WHICH ASSERTION, NOT JUST WHICH TASK. `dbt_test` runs a selector, so the task name cannot
     # say what broke — that is the whole reason cfdb_heartbeat.sh sends the test name.
     for name, (count, age) in sorted(failed_tests.items()):
-        print(f"  FAILED  {name}: {count} row(s), last failed {describe(age)} ago")
+        print(f"  FAILED  {name}: {count} row(s), last failed {describe(age)} ago — "
+              f"its most recent result, so nothing has passed it since")
 
     # 🚨 THE OUTCOME LINES, REPORTED FIRST AMONG THE FAULTS BECAUSE THEY ARE THE ONLY ONES A
     # READER WOULD NOTICE. Everything above says the machinery ran; these say whether last
@@ -333,11 +424,13 @@ def main(argv=None) -> int:
         for line in stale + missing:
             print(f"::error::heartbeat absent — {line}")
         for task, age in sorted(failures.items()):
-            print(f"::error::task failed — {task}, {describe(age)} ago. A gated DAG has "
+            print(f"::error::task failed — {task}, {describe(age)} ago; "
+                  f"{failure_tense(task, age, runs)}. A gated DAG has "
                   f"exhausted its retries; anything downstream of it, including the publish, "
                   f"did not run.")
         for name, (count, age) in sorted(failed_tests.items()):
-            print(f"::error::dbt test failed — {name}, {count} row(s), {describe(age)} ago. "
+            print(f"::error::dbt test failed — {name}, {count} row(s), {describe(age)} ago, "
+                  f"and nothing has passed it since. "
                   f"This is the ASSERTION rather than the task: anything downstream of the "
                   f"test, including the publish, did not run.")
         # 🚨 THE THREE SILENT EXITS. `unboxed_now` is true in three different ways and NONE of

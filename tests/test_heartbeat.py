@@ -924,11 +924,11 @@ def test_every_outcome_line_the_monitor_emits_is_parsed_by_the_watcher():
     emitted = set(re.findall(r"select\s+'([a-z_]+)\|'", code))
     assert emitted, "found no outcome lines in the script — this test is not reading it"
 
-    # ⚠️ TWO EMITTED HEADS ARE **PROCESS** LINES, NOT OUTCOME LINES, AND THEY HAVE THEIR OWN
+    # ⚠️ THREE EMITTED HEADS ARE **PROCESS** LINES, NOT OUTCOME LINES, AND THEY HAVE THEIR OWN
     # BRANCHES. `failed|<dag>.<task>|<seconds>` and `failed_test|<name>|<rows>|<seconds>` say
     # the machinery broke; the outcome lines say the SITE is wrong. They are named here rather
     # than matched loosely, so a genuinely new head still fails this test.
-    PROCESS_HEADS = {"failed", "failed_test"}
+    PROCESS_HEADS = {"failed", "failed_test", "dag_run"}   # dag_run: A293, each cadence's runs
     for head in PROCESS_HEADS:
         assert f'"{head}"' in _watcher_source(), (
             f"{head} is emitted but the watcher has no branch for it")
