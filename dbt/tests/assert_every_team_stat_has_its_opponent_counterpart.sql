@@ -15,6 +15,8 @@
 -- performance measure, so an opponent variant of it would be meaningless — a team and its
 -- opponents play the same number of games. Excluding it by an explicit name rather than by a
 -- pattern keeps the exemption to exactly one stat.
+{{ config(severity='warn') }}
+
 with scoped as (
     select distinct stat_base_name, stat_scope
     from {{ ref('fct_team_season_stat') }}

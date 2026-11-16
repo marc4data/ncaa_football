@@ -31,6 +31,8 @@
 -- 📊 VERIFIED ON ALL 1,898 ROWS BEFORE THE SWITCH rather than assumed: zero violations of claims
 -- 2, 3 and 4 against the `_by_clock` family, and the null pattern is the SAME THREE GAMES — which
 -- is what claim 4 is about, so a differing count would have been the thing to find.
+{{ config(severity='warn') }}
+
 select
     game_id,
     plays_with_win_probability,

@@ -7,6 +7,8 @@
 -- `yards_from_own_goal` off `yardline` instead would pass the complement test and fail here.
 --
 -- It cannot pass vacuously: the touchback is the most common start in the data.
+{{ config(severity='warn') }}
+
 select 'no touchback drive reads as 25 yards from own goal' as failure
 from (
     select count(*) as n

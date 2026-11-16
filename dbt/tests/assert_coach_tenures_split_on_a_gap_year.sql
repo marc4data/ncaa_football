@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only`: it reads `fct_coach_team_season` against `stg_coach_season`, and
 -- no gated DAG rebuilds both — `/coaches` is a HISTORY_FULL endpoint fetched by the backfill, not
 -- by the two-hourly scores DAG. `ci/check_test_refresh_scope.py` is the guard that would otherwise

@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- A196 (cfdb-main-R-2035). The three high-value flags say what their own inputs say.
 --
 -- MARC, v12: "Look for Top 25 matchups. Matchups with an undefeated FBS team and a

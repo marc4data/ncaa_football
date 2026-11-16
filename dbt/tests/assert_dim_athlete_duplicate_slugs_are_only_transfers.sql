@@ -9,6 +9,8 @@
 -- when the rows differ by team and agree on the player. Two rows sharing a slug AND a team,
 -- or sharing a slug across DIFFERENT players, would both be real defects: the first a
 -- genuine duplicate, the second a slug collision the player id was added to prevent.
+{{ config(severity='warn') }}
+
 select season, athlete_slug,
        count(*)                     as rows_for_slug,
        count(distinct team)         as distinct_teams,

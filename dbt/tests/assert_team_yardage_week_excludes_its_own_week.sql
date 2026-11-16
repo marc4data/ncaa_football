@@ -46,6 +46,8 @@
 -- ONLY ROWS WITH SOMETHING TO CHECK. Where games_counted is 0 the model publishes null by
 -- design (0 yards is a measurement a team that has not played did not make), so those rows
 -- carry no arithmetic to verify and are excluded rather than coalesced into a false equality.
+{{ config(severity='warn') }}
+
 with counted_games as (
 
     -- The same "both sides of the box score are held" rule the model counts on. Stated again

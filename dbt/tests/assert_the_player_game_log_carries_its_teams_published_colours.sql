@@ -1,4 +1,4 @@
-{{ config(tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- TAGGED `full_refresh_only`: excluded from cfbd_scores_refresh, which rebuilds `dim_team` and
 -- NOT `srv_player_game_log`, so mid-refresh the two sides of this comparison are from different
 -- builds and the test would fail on a legitimate state. Full authority on the weekly

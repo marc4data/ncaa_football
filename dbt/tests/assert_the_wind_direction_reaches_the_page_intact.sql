@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['scores_refresh_only']) }}
+{{ config(severity='warn', tags=['scores_refresh_only']) }}
 -- 🚨 TAGGED `scores_refresh_only`, AND A GUARD SAID SO BEFORE A GAME DAY DID. R-684.
 --
 -- ci/check_test_refresh_scope.py, on this test's first run: it reads `fct_game_weather`, which

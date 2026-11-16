@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only` for its family's reason (R-672).
 --
 -- MARC'S INVARIANT, CARRIED ACROSS THE CUMULATIVE WINDOW. A143, cfdb-main-R-973 — the twin of

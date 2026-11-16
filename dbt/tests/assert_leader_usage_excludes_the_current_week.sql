@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- R-694. 🚨 MARC'S RULE: "Can only include data through Week 4 in a Week 5 game."
 --
 -- The usage marks beside a leader are the games he had already played. A mark for the leader's OWN

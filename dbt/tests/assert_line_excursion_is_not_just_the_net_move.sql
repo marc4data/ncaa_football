@@ -23,6 +23,8 @@
 --      differ on 17% of spreads and 29% of win probabilities) and silent where no game has a
 --      history to diverge over.
 
+{{ config(severity='warn') }}
+
 with movement as (
 
     select * from {{ ref('fct_game_line_movement') }}

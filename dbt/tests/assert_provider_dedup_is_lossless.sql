@@ -2,6 +2,8 @@
 -- for every duplicate group, the row we drop must not carry a non-null value where the row
 -- we keep is null. If it ever does, the dedup rule is wrong and we are losing data quietly.
 
+{{ config(severity='warn') }}
+
 with ranked as (
     select * from {{ ref('stg_lines') }}
 ),

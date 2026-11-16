@@ -26,6 +26,8 @@
 -- were backwards; only the END half can fail when `end_yardline` picks the wrong branch. A
 -- guard that cannot fail under the break it was written for is decoration (R-760), so this
 -- one was checked by flipping the branch and watching it fire.
+{{ config(severity='warn') }}
+
 select 'start' as which_end, play_id, game_id, offense, home_team,
        yardline as yl, yards_to_goal as ytg, yardline + yards_to_goal as coordinate_sum
 from {{ ref('fct_play') }}

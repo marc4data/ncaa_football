@@ -16,6 +16,8 @@
 -- every run overwrite yesterday, and the history would silently collapse to a single row per
 -- week while looking perfectly healthy. That is what this catches: a duplicate on the full
 -- grain means the key is not doing its job.
+{{ config(severity='warn') }}
+
 select season, season_type, week, span, metric, as_of_date, count(*) as rows_for_that_day
 from {{ ref('fct_week_metric_distribution') }}
 group by season, season_type, week, span, metric, as_of_date

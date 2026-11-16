@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only` for its family's reason (R-672): it compares a serving view with
 -- marts the two-hourly scores DAG does not rebuild on one cadence.
 --

@@ -5,6 +5,8 @@
 -- error. The anchor case is a touchback — 75 yards to go, which must come out as 25 yards from
 -- your own goal, and which is the single most common drive start in the data (20,393 of
 -- 78,502). See its own test for that.
+{{ config(severity='warn') }}
+
 select
     drive_id,
     game_id,

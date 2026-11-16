@@ -8,6 +8,8 @@
 --
 -- Every pair is listed rather than a representative one — the suppression is six separate
 -- CASE expressions in the model and they can rot independently.
+{{ config(severity='warn') }}
+
 select
     game_team_sk,
     spread_open, spread_final,

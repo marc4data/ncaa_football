@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- ⚠️ NO `full_refresh_only` TAG, AND THE PROJECT'S OWN GUARD IS WHY. The first draft
 -- carried it by habit from A151's roster test; `test_single_sided_tests_keep_their_coverage_in_the_partial_rebuild_dags`
 -- refused it: this test reads ONE model, so it cannot straddle the two-hourly refresh

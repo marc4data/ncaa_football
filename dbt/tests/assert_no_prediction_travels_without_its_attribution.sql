@@ -21,6 +21,8 @@
 -- NOT the reverse. Attribution present with no prediction is correct and common — no model
 -- row for that game, so nothing to attribute. The failure is a populated forecast beside a
 -- blank attribution.
+{{ config(severity='error') }}
+
 select
     game_id,
     season,

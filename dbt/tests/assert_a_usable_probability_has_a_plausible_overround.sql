@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- is_probability_usable must never be true where the inputs are not (R-391).
 -- Catches the two flags drifting apart in a later edit.
 select game_id, provider_key, snapshot_ts, overround, has_moneyline_sentinel

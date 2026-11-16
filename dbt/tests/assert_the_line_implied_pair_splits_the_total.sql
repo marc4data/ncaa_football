@@ -12,6 +12,8 @@
 -- then agree with whatever the model does.
 --
 -- Zero violations across 3,287 games with a line on 2026-09-04.
+{{ config(severity='warn') }}
+
 select
     game_id,
     sum(line_implied_points_final) as implied_sum,

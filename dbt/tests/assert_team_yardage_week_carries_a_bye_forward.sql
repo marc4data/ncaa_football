@@ -14,6 +14,8 @@
 -- PREVIOUS slot, this row's cumulative figures must equal the previous row's exactly — same
 -- yards, same games_counted. Adjacency is by the season's own chronology, never by week
 -- alone.
+{{ config(severity='warn') }}
+
 with slots as (
 
     select

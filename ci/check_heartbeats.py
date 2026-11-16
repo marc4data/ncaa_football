@@ -122,6 +122,9 @@ class Reading(tuple):
     tense is unknown" rather than crashing.
     """
     runs: dict = {}
+    # A294: `warned_test` lines, `{name: (rows, seconds ago)}`. An attribute for `.runs`'s
+    # reason — the gate unpacks four — and because a warning must never reach the page set.
+    warned: dict = {}
 
 
 def _seconds_or_none(field: str):
@@ -130,7 +133,7 @@ def _seconds_or_none(field: str):
 
 def parse_payload(text: str) -> tuple:
     """A `Reading` of the forced command's output."""
-    ages, failures, failed_tests, outcomes, runs = {}, {}, {}, {}, {}
+    ages, failures, failed_tests, outcomes, runs, warned = {}, {}, {}, {}, {}, {}
     for line in text.splitlines():
         line = line.strip()
         if not line or "|" not in line:
@@ -197,11 +200,12 @@ def parse_payload(text: str) -> tuple:
             except ValueError:
                 pass
             continue
-        if head.strip() == "failed_test":
+        if head.strip() in ("failed_test", "warned_test"):
             name, _, tail = rest.partition("|")
             count, _, age = tail.partition("|")
+            target = failed_tests if head.strip() == "failed_test" else warned
             try:
-                failed_tests[name.strip()] = (int(count), int(age))
+                target[name.strip()] = (int(count), int(age))
             except ValueError:
                 continue
             continue
@@ -221,6 +225,7 @@ def parse_payload(text: str) -> tuple:
             continue
     reading = Reading((ages, failures, failed_tests, outcomes))
     reading.runs = runs
+    reading.warned = warned
     return reading
 
 
@@ -289,6 +294,7 @@ def main(argv=None) -> int:
         return 1
     ages, failures, failed_tests, outcomes = reading
     runs = getattr(reading, "runs", {})
+    warned = getattr(reading, "warned", {})
 
     stale, missing, ok = [], [], []
     for name, (cadence, budget) in sorted(CADENCES.items()):
@@ -328,6 +334,12 @@ def main(argv=None) -> int:
     for name, (count, age) in sorted(failed_tests.items()):
         print(f"  FAILED  {name}: {count} row(s), last failed {describe(age)} ago — "
               f"its most recent result, so nothing has passed it since")
+
+    # A294 (cfdb-main-R-5131): an assertion at `warn` that found rows. HEARD, NOT PAGED — it is
+    # printed and annotated, and it is deliberately absent from `page` below, so it neither
+    # emails nor holds the publish path. Stale beats dark; only wrong data gates.
+    for name, (count, age) in sorted(warned.items()):
+        print(f"  WARNED  {name}: {count} row(s), {describe(age)} ago — does not hold the publish")
 
     # 🚨 THE OUTCOME LINES, REPORTED FIRST AMONG THE FAULTS BECAUSE THEY ARE THE ONLY ONES A
     # READER WOULD NOTICE. Everything above says the machinery ran; these say whether last
@@ -395,6 +407,9 @@ def main(argv=None) -> int:
     # 🚨 THE PAGE SET IS THE EXIT CODE, AND NOTHING ELSE IS. Everything in it means the
     # pipeline is down, stuck, or unwatchable.
     page = bool(stale or missing or failures or failed_tests or blind)
+    for name, (count, age) in sorted(warned.items()):
+        print(f"::warning::dbt test warned — {name}, {count} row(s), {describe(age)} ago. "
+              f"Severity warn: the publish went ahead.")
 
     if page or gaps:
         print()

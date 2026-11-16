@@ -33,6 +33,8 @@
 --   1. NOTHING IS LOST. Every `game_team_sk` in `fct_game_team` reaches `srv_game_team`.
 --   2. NOTHING IS DUPLICATED. The serving view stays one row per team-game — the other way a
 --      join goes wrong, and the one a "missing rows" test cannot see.
+{{ config(severity='warn') }}
+
 with modelled as (
 
     select game_team_sk, season, week, team_id, game_id

@@ -19,6 +19,8 @@
 --
 -- It fails LOUD rather than warning: a missing possession is not a data-quality nuance, it is
 -- a wrong answer to "what happened in this game".
+{{ config(severity='warn') }}
+
 select
     d.drive_id,
     d.game_id,

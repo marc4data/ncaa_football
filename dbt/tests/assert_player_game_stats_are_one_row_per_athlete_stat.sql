@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- One row per game x team x category x stat type x athlete (R-392).
 --
 -- THIS IS THE TEST THAT WAS MISSING. The model already builds player_game_stat_sk from

@@ -28,6 +28,8 @@
 -- one side of it. 📊 Week 3: 35 + 39 = 74 covers+fails=games, and 74 + 1 push + 0 no-line +
 -- 0 pick'ems = 75 = completed games. Under the break the first identity reads 36 + 39 = 75
 -- against a denominator of 74 and the row fires.
+{{ config(severity='warn') }}
+
 select
     season, season_type, week,
     favorite_straight_up_rate, favorite_straight_up_wins, favorite_straight_up_games,

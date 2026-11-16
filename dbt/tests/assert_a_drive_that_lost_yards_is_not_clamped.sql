@@ -7,6 +7,8 @@
 --                  or something clamped it. Measured: 8,750 of 78,502 do, so this cannot pass
 --                  vacuously — which is the failure mode the prompt asked to be ruled out.
 --   'flag wrong'   is_negative_drive disagrees with the coordinates it is derived from.
+{{ config(severity='warn') }}
+
 select 'no negative-yardage drive exists — geometry may be clamped' as failure
 from (
     select count(*) as n

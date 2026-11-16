@@ -45,6 +45,8 @@
 -- exactly what that catches, and it holds at every sample size and on every distribution.
 --
 -- 📊 All six clauses return 0 rows over all 10,190 rows of the built model.
+{{ config(severity='warn') }}
+
 select season, season_type, week, span, metric, as_of_date,
        min_value, whisker_lo, p25, p75, whisker_hi, max_value, outlier_count
 from {{ ref('fct_week_metric_distribution') }}

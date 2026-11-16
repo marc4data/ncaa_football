@@ -7,6 +7,8 @@
 --
 -- The cross join to mart_as_of is the other way to lose the lot: if the 'game' domain row ever
 -- disappears, this returns zero rows and the count goes to nothing.
+{{ config(severity='warn') }}
+
 select
     fct.n as fct_drive_rows,
     srv.n as srv_drive_rows

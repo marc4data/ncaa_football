@@ -9,6 +9,8 @@
 -- some row somewhere was unknown. That passes on production (6,125 of 485,005 rows, 1.3%) and
 -- fails on any dataset that happens to contain no stubs — which is exactly what CI has. A
 -- test that depends on the data having a particular shape is testing the fixture.
+{{ config(severity='warn') }}
+
 select r.season, r.season_type, r.week, r.team_id, r.current_record
 from {{ ref('fct_team_record_week') }} r
 join {{ ref('dim_team') }} t

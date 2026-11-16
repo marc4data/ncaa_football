@@ -511,3 +511,24 @@ fi
   where recency = 1 and status in ('fail', 'error')
   order by failures desc nulls last, unique_id
 " || echo "failed_test|MONITOR.cannot_read_dbt_results|0|0"
+
+# A294 (cfdb-main-R-5131). `warned_test|<name>|<rows>|<seconds ago>` — an assertion at
+# severity `warn` that found rows. dbt records it as status `warn`, which the query above
+# deliberately excludes, so before this line a demoted test was heard by NOTHING the switch
+# reads. A separate head rather than a wider `status in (...)` above, because `failed_test`
+# PAGES and holds the publish-path gate red, and a warning must do neither.
+"${PSQL[@]}" -c "
+  select 'warned_test|' ||
+         split_part(unique_id, '.', 3) || '|' ||
+         coalesce(failures, 0)::text || '|' ||
+         floor(extract(epoch from (now() - generated_at)))::bigint
+  from (
+    select unique_id, failures, generated_at, status,
+           row_number() over (partition by unique_id
+                              order by generated_at desc) as recency
+    from raw.raw_dbt_test_result
+    where generated_at > now() - interval '6 hours'
+  ) ranked
+  where recency = 1 and status = 'warn'
+  order by failures desc nulls last, unique_id
+" || echo "warned_test|MONITOR.cannot_read_dbt_results|0|0"

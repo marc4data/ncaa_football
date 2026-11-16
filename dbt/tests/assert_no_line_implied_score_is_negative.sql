@@ -6,6 +6,8 @@
 -- reason that has nothing to do with football.
 --
 -- Lowest observed on 2026-09-04 is 2.5, across every season the market covers.
+{{ config(severity='warn') }}
+
 select game_team_sk, spread_final, total_final,
        line_implied_points_final, line_implied_points_open
 from {{ ref('srv_game_team') }}

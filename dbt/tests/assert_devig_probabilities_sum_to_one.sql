@@ -2,6 +2,8 @@
 -- vig, and it is the one property that distinguishes a de-vigged probability from a raw
 -- implied one — which sums to ~1.05 and would silently overstate every edge computed
 -- against it.
+{{ config(severity='error') }}
+
 select
     betting_line_sk,
     game_id,

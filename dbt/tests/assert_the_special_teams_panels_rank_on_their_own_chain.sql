@@ -14,6 +14,8 @@
 -- the man the team sent out. Points is "made" in disguise and would hide him behind a team-mate
 -- who kicked three extra points.
 
+{{ config(severity='warn') }}
+
 with leaders as (
 
     select game_id, team_id, panel, player_name, leader_rank,

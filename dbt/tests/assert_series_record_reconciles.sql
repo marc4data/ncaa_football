@@ -13,6 +13,8 @@
 -- ties equals meetings. That also caught the second defect in the same pass — two games
 -- flagged completed with no score recorded were counted as meetings while producing no
 -- outcome, giving a record of 0-0-0 over one game.
+{{ config(severity='warn') }}
+
 select
     game_id,
     series_games,

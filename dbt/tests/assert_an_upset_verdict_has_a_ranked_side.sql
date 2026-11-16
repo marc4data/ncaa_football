@@ -7,6 +7,8 @@
 --
 -- The property, stated so it cannot regress: a game may only carry a true-or-false verdict if
 -- at least one side was ranked. No rank, no verdict.
+{{ config(severity='warn') }}
+
 select game_id, home_rank, away_rank, is_upset
 from {{ ref('fct_game') }}
 where is_upset is not null

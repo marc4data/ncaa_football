@@ -13,6 +13,8 @@
 -- board from the offense's point of view is a safety, a field goal, a touchdown alone or with
 -- either conversion — positive or negative — or nothing. A render caught a FIELD GOAL worth
 -- -4 passing the first check, which is why there are two.
+{{ config(severity='warn') }}
+
 select
     drive_id,
     season,

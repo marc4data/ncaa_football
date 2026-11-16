@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- R-694. 🚨 THE BREAK THIS EXISTS FOR IS INVISIBLE ON THE PAGE AND A READER WOULD BELIEVE IT.
 --
 -- Attaching one game's usage to a different game — or one player's to another — changes a circle

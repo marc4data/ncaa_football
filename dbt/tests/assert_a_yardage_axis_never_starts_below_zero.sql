@@ -14,6 +14,8 @@
 -- floor be a flat zero instead of a per-metric setting. If a signed metric is ever added to the
 -- model's `metrics` list, this test fails and that is the point: the floor becomes a decision
 -- again rather than an inherited default.
+{{ config(severity='warn') }}
+
 select season, season_type, week, metric, axis_min, axis_max, whisker_low, min_value
 from {{ ref('fct_team_week_metric_distribution') }}
 where axis_min < 0

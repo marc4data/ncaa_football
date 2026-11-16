@@ -12,6 +12,8 @@
 -- true of the real data (3,539 rows against 12,292 in 2025) and is not guaranteed for a small
 -- fixture, where a category may hold exactly one statistic and the two sets coincide. A test
 -- that fires on a legitimate fixture is a test that gets deleted (2.3.3).
+{{ config(severity='warn') }}
+
 select
     season,
     stat_category,

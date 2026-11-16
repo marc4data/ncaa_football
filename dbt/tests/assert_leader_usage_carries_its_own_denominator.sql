@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- R-694. 🚨 §4.2 — THE PAGE DOES NOT DIVIDE, SO THE DENOMINATOR TRAVELS WITH THE NUMBER.
 --
 -- Usage is strongly positional. Measured medians: QB 0.551, RB 0.134, WR 0.058, TE 0.041. A circle

@@ -16,6 +16,8 @@
 -- rather than doing nothing or doing everything. Changing it is one literal in
 -- `macros/matchup_outlook.sql` AND one here — and the fact that it appears twice is deliberate:
 -- a test that reads the threshold from the macro would agree with the macro by construction.
+{{ config(severity='warn') }}
+
 with recomputed as (
 
     {% for metric in ['rushing', 'passing', 'total'] %}

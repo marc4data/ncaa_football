@@ -9,6 +9,8 @@
 -- boundary applied at the wrong end, the maximum value falling outside the last bin because
 -- the range is [lo, hi) all the way up, a metric whose edges do not match between the two
 -- models, and a span present in one model and absent from the other.
+{{ config(severity='warn') }}
+
 select
     d.season, d.season_type, d.week, d.span, d.metric, d.as_of_date,
     d.n,

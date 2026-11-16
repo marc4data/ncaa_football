@@ -17,6 +17,8 @@
 -- aren't in the teams list still appear here, which is correct — the check is on
 -- games, not on roster completeness.
 
+{{ config(severity='warn') }}
+
 select
     season,
     sum(wins)   as total_wins,

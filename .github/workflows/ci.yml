@@ -309,6 +309,12 @@ jobs:
         # Six point fixes and a prose rule did not prevent a seventh. This reads the manifest.
         run: python ci/check_test_refresh_scope.py
 
+      - name: Assert every singular test declares its severity
+        # A294. The project default is `warn` (dbt_project.yml); a test that may stop the
+        # publish must say `error` in its own file, and one that does not say either has not
+        # been thought about. 84 of 142 had never said, and 129 could each stop the site.
+        run: python ci/check_test_severity_declared.py
+
       - name: Assert what we publish hot is what we rebuild
         # A079/R-533. HOT_SERVING and the gated DAGs' selectors are two lists that must agree,
         # and until now nothing checked that they did. srv_team_week was shipped on every

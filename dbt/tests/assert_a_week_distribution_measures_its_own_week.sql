@@ -27,6 +27,8 @@
 -- ⚠️ BOTH RELATIONS ARE `ref()`ed (§3.6), so this is ordered after them rather than free to run
 -- before either exists, and it names no week and no game (§2.3.3) so it says the same true
 -- thing about CI's fixture sample as about the warehouse.
+{{ config(severity='warn') }}
+
 with expected as (
     -- One row per (game, metric, as_of_date) there, so the week's game count is a DISTINCT
     -- count of game_id. The FBS-either-side population is applied in that model, once.

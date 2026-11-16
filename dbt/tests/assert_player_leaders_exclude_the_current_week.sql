@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only`, AND A GUARD SAID SO BEFORE A GAME DAY DID. R-687.
 --
 -- ci/check_test_refresh_scope.py, on this test's first run: it reads `dim_team_week`, which

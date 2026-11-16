@@ -27,6 +27,8 @@
 -- srv_team_rating joined a domain built entirely from real, correct, current labels that had
 -- nothing to do with ratings. The stronger check is proposed in the A077 report; this is the
 -- cheap half that closes the silent-failure half of the class.
+{{ config(severity='warn') }}
+
 with mapped as (
 
     -- The map, restated. ⚠️ It is restated rather than selected out of mart_as_of because

@@ -37,6 +37,8 @@
 --
 -- row_number() rather than `distinct on` because these models build on Postgres and Spark.
 -- ==========================================================================================
+{{ config(severity='warn') }}
+
 with week_rows as (
 
     select season, season_type, metric, week, as_of_date, n

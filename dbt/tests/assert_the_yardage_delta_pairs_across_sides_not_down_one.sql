@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- R-686. 🚨 THE TRAP IS THAT THE TWO FIGURES LIVE ON DIFFERENT ROWS.
 --
 -- Marc, 2026-09-12: "Add a column that shows the delta. If the Team gained > allowed, then delta

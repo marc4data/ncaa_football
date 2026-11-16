@@ -7,6 +7,8 @@
 -- The inner join to fct_game is the loss risk — it matched 100.00% when built, but a game
 -- arriving in the box-score feed before the game spine has it would silently drop every
 -- player in it. Exact parity catches both directions.
+{{ config(severity='warn') }}
+
 with source_rows as (select count(*) as n from {{ ref('stg_game_player_stat') }}),
      fact_rows   as (select count(*) as n from {{ ref('fct_player_game_stat') }})
 select source_rows.n as staging_rows, fact_rows.n as fact_rows

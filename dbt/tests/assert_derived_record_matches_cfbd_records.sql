@@ -1,4 +1,4 @@
-{{ config(tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- TAGGED `full_refresh_only`: excluded from cfbd_scores_refresh, which refreshes one side of
 -- this comparison and not the other. Full authority on the weekly +tag:production build,
 -- which refetches both. See dags/scores_refresh_dag.py TEST_EXCLUDE.

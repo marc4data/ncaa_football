@@ -10,6 +10,8 @@
 --
 -- More than one is not automatically wrong in history — a week can have several unlocked
 -- daily rows and then one locked one. So the count is of LOCKED rows only.
+{{ config(severity='warn') }}
+
 select season, season_type, week, span, metric, count(*) as locked_snapshots
 from {{ ref('fct_week_metric_distribution') }}
 where is_locked

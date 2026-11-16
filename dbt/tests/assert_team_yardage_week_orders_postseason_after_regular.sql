@@ -13,6 +13,8 @@
 --
 -- Restricted to teams that actually reached the postseason and had counted regular-season
 -- games, because a team with neither has nothing to compare.
+{{ config(severity='warn') }}
+
 with last_regular as (
 
     select distinct on (season, team_id)

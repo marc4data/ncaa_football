@@ -7,6 +7,8 @@
 -- test that fails on the new one.
 --
 -- The measured vocabulary is 25 values over 78,502 drives. This fires on the 26th.
+{{ config(severity='warn') }}
+
 select
     drive_result,
     count(*) as drives

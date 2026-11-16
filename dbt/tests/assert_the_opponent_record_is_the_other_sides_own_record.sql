@@ -15,6 +15,8 @@
 -- ⚠️ INNER JOIN, SO IT PINS WHAT IT CAN SEE AND IS SILENT WHERE THE OTHER SIDE IS ABSENT
 -- (2.3.3). A game with one row in this relation — an FBS side against an opponent the
 -- warehouse holds no team row for — is a different fact and not this test's business.
+{{ config(severity='warn') }}
+
 select
     a.game_id,
     a.team                            as side_a,
