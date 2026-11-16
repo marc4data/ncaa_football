@@ -8,6 +8,8 @@
 -- with a raw value, no parsed value, and no reason. That is indistinguishable from a genuine
 -- absence unless something asserts the difference, which is why "--" is named explicitly
 -- rather than lumped in with "anything we could not parse".
+{{ config(severity='warn') }}
+
 select game_id, player_id, stat_category, stat_type, stat_raw
 from {{ ref('fct_player_game_stat') }}
 where stat_value is null

@@ -12,9 +12,14 @@
 -- there is to make the next undocumented column fail the build rather than add one more
 -- line to a warning nobody reads.
 --
+-- ⚠️ BACK TO WARN, A294 (cfdb-main-R-5131). An undocumented column does not make the site show
+-- anything wrong, so under Marc's rule it may not hold the publish. The "warning nobody reads"
+-- concern above is answered differently now: a warn result reaches the switch as a named
+-- `warned_test` line (deploy/cfdb_heartbeat.sh) instead of being silent.
+--
 -- This checks the SERVING layer only. Staging and dimensional coverage are still partial
 -- and are not in scope here; widening it is a separate decision with a separate backlog.
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 
 {#- 🚨 THE EDGE THAT MAKES THIS TEST MEAN WHAT IT SAYS. R-714 / CLAUDE.md §3.6.
 

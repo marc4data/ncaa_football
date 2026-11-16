@@ -7,6 +7,8 @@
 --
 -- Also pins the count against the configured one rather than against a literal 10, so
 -- changing `distribution_bin_count` moves the test with the model.
+{{ config(severity='warn') }}
+
 select season, season_type, week, span, metric, as_of_date, count(*) as bins
 from {{ ref('fct_week_metric_distribution_bin') }}
 group by season, season_type, week, span, metric, as_of_date

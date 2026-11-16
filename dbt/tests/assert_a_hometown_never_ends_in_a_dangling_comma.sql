@@ -15,6 +15,8 @@
 --
 -- The test is on the SERVING column because that is what a reader meets, and it is cheap: a
 -- trailing separator is always a defect, in either direction, whatever produced it.
+{{ config(severity='warn') }}
+
 select
     athlete_sk,
     full_name,

@@ -22,6 +22,8 @@
 --
 -- Returns ONE row when the share is exceeded, carrying the numbers, so the failure says how
 -- far out it is rather than just that it is.
+{{ config(severity='warn') }}
+
 select
     count(*)                                                            as rows_compared,
     count(*) filter (where sign(spread) <> sign(spread_open))           as opposite_sign,

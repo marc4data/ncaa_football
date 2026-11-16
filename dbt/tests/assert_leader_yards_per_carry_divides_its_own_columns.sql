@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only` FOR THE SAME REASON AS ITS SIBLING, AND THE SIBLING'S HEADER
 -- CARRIES THE MEASUREMENT. It reads `fct_player_leader_week`, which no gated DAG rebuilds — the
 -- leader tables derive from player box scores and /games/players is fetched on Sundays and

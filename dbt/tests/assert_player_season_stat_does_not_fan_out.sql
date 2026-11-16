@@ -9,6 +9,8 @@
 -- history to satisfy a foreign key dim_athlete cannot supply before 2024.
 --
 -- Both are caught by asserting exact parity with the source.
+{{ config(severity='warn') }}
+
 with source_rows as (select count(*) as n from {{ ref('stg_player_season_stat') }}),
      fact_rows   as (select count(*) as n from {{ ref('fct_player_season_stat') }})
 select source_rows.n as staging_rows, fact_rows.n as fact_rows

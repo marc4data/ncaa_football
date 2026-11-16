@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only`: it reads `srv_game_team_leader_in_this_game` against
 -- `fct_player_game_stat`, and no gated DAG rebuilds both. `ci/check_test_refresh_scope.py` is the
 -- guard that would otherwise stop that DAG's publish (R-672).

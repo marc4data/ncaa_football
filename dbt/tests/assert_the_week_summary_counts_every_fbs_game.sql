@@ -21,6 +21,8 @@
 --
 -- ⚠️ AND IT IS A PROPERTY, NOT A PINNED VALUE (§2.3.3), so it says the same true thing about
 -- CI's fixture sample as about the production warehouse. It names no game and no week.
+{{ config(severity='warn') }}
+
 with from_the_game_view as (
     select season, season_type, week, count(*) as game_view_games
     from {{ ref('srv_game') }}

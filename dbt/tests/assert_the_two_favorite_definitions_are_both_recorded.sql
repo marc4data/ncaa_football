@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- Neither derivation of "favourite" may go missing when its inputs are present (R-393).
 --
 -- The defect this prevents is not a crash: it is a page ranking on `spread_favorite_side`

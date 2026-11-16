@@ -22,6 +22,8 @@
 -- A null display renders as an em dash where a team should be. A null slug is worse: it is
 -- a clickable row pointing nowhere, and a link to nowhere is worse than a row that was
 -- never clickable.
+{{ config(severity='warn') }}
+
 with offenders as (
 
     {% set paired = [

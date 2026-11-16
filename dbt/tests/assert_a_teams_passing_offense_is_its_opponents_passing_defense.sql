@@ -1,4 +1,4 @@
-{{ config(tags=[]) }}
+{{ config(severity='warn', tags=[]) }}
 
 -- 🚨 THE OFFENSE/DEFENSE SIDES ARE RECONCILED, NOT TRUSTED (A286, cfdb-main-R-4892).
 --

@@ -26,6 +26,8 @@
 -- it passed throughout — `play_id` was unique the entire time the feed was wrong. Two different
 -- ids for one play is exactly the shape a play_id grain cannot see.
 
+{{ config(severity='warn') }}
+
 select
     game_id,
     play_number,

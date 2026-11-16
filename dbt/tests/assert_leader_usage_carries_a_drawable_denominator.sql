@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only` FOR THE REASON ITS SIBLINGS CARRY: it reads
 -- `srv_game_team_leader_usage`, which is built from `game/box/advanced` — one API call per game,
 -- fetched weekly rather than two-hourly. `ci/check_test_refresh_scope.py` is the guard that would

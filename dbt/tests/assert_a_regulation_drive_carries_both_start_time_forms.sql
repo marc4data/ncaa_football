@@ -6,6 +6,8 @@
 -- elapsed-from-kickoff is undefined there and is null by design rather than by omission —
 -- 326 drives at period >= 5, plus 24 at period 0, which is a source defect and not a period.
 -- drive_number orders those rows, which is why it is the y-axis and these two are labels.
+{{ config(severity='warn') }}
+
 select
     drive_id,
     game_id,

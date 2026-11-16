@@ -17,6 +17,8 @@
 -- ALSO ASSERTS THE ABSENCES MATCH. Null means "we do not know where one end was" and 0 means
 -- "they played at home" — if one unit is null while the other is not, one of those two meanings
 -- has been lost in the conversion.
+{{ config(severity='warn') }}
+
 select game_id, team_id, team,
        travel_km, travel_miles,
        elevation_change_m, elevation_change_ft,

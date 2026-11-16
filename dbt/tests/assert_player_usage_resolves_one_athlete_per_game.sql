@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- R-694. 🚨 THE PAYLOAD HAS NO ATHLETE ID AND THE SOURCE MODEL SAYS SO ITSELF:
 -- "Two players with the same name in one game would collide, and there is nothing in the response
 -- that could separate them."

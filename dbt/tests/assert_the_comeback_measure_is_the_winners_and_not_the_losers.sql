@@ -39,6 +39,8 @@
 -- far more often than below: measured 1,653 games against 245. Under the swap those two numbers
 -- exchange places. It is one row of assertion and it cannot be satisfied by an empty result,
 -- because the aggregate is computed over the whole model.
+{{ config(severity='warn') }}
+
 with box as (
 
     select

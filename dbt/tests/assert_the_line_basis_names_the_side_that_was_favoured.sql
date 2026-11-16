@@ -7,6 +7,8 @@
 -- Stated as the two things that must never be true:
 --   a home favourite (spread < 0) who WON (margin < 0) flagged as an upset
 --   an away favourite (spread > 0) who WON (margin > 0) flagged as an upset
+{{ config(severity='error') }}
+
 select game_id, spread_at_close, actual_margin, is_upset_by_line
 from {{ ref('srv_game') }}
 where is_upset_by_line

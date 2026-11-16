@@ -11,6 +11,8 @@
 -- list, it must carry that season's attributes. A row flagged as listed but missing a
 -- school or classification means the join matched on the wrong grain.
 
+{{ config(severity='warn') }}
+
 select
     team_season_key,
     school,

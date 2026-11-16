@@ -12,6 +12,8 @@
 --
 -- Written as a left-anti selection against a literal list rather than a count, so a failure
 -- names the missing segment instead of reporting a number that has to be looked into.
+{{ config(severity='warn') }}
+
 with expected(segment_type) as (
     select 'overall'     union all
     select 'week'        union all

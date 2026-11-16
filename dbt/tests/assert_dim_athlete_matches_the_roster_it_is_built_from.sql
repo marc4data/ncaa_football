@@ -9,6 +9,8 @@
 -- because it catches the loss case too: an inner join slipping in would drop the 321 NAIA
 -- and Division II athletes whose team is absent from /teams, and that is the specific
 -- mistake this model's header argues against.
+{{ config(severity='warn') }}
+
 with source_rows as (select count(*) as n from {{ ref('stg_roster') }}),
      dim_rows    as (select count(*) as n from {{ ref('dim_athlete') }})
 select source_rows.n as roster_rows, dim_rows.n as athlete_rows

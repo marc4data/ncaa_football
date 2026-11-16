@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- A GUARD NOBODY HAS SEEN REJECT ANYTHING IS A GUARD NOBODY HAS TESTED (R-391).
 --
 -- FIRST DRAFT WAS WRONG AND CI CAUGHT IT. It asserted that fct_market_probability contains

@@ -16,6 +16,8 @@
 -- ⚠️ IT `ref()`s ITS SUBJECT (§3.6), so it is ordered after the model rather than free to run
 -- before the table exists — and it is a PROPERTY, naming no drive and no season, so it says
 -- the same true thing about CI's fixture as about the warehouse (§2.3.3).
+{{ config(severity='warn') }}
+
 select
     drive_id,
     season,

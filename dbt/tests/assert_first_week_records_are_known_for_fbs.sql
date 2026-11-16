@@ -9,6 +9,8 @@
 -- Scoped to FBS because that is the whole of Marc's rule: 0-0 is the truth for a team that has
 -- not played, and a lie for a Division II side in the spine only because it appears on
 -- somebody else's schedule. `assert_record_guard_still_discriminates` holds the other side.
+{{ config(severity='warn') }}
+
 select r.season, r.team_id, r.record_is_known, r.current_record
 from {{ ref('fct_team_record_week') }} r
 join {{ ref('dim_team') }} t

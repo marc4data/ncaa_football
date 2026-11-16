@@ -9,6 +9,8 @@
 -- cannot make: that one grades the WINNER and would pass while the loser's row was wrong.
 --
 -- Zero violations across 3,287 games on 2026-09-04.
+{{ config(severity='error') }}
+
 select
     game_id,
     sum(ats_margin_final) as ats_sum

@@ -8,6 +8,8 @@
 -- Verified against all 5,133 rows of the pack's training data before it was adopted.
 --
 -- Only completed games are checked: an unplayed game has no points and no actual margin.
+{{ config(severity='error') }}
+
 select
     game_id,
     model_name,

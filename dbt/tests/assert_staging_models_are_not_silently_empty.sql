@@ -25,6 +25,8 @@
 -- them. The four models over them — stg_dbt_test_result, stg_deploy_status,
 -- stg_predictions and stg_warehouse_usage — are excluded rather than special-cased in
 -- the predicate.
+{{ config(severity='warn') }}
+
 {% set model_sources = [
     ('stg_calendar', 'raw_calendar'),
     ('stg_conferences', 'raw_conferences'),

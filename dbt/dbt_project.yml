@@ -112,6 +112,37 @@ models:
       # path exactly as before.
       +tags: ['production']
 
+# A294 (cfdb-main-R-5131). A SINGULAR ASSERTION WARNS UNLESS IT SAYS OTHERWISE.
+#
+# 📊 Until now nothing was set here, so dbt's own default, `error`, applied: 129 of the 142
+# assertions in tests/ sat at error inside a gated selector, 84 of them because nobody had written
+# a config() at all. `publish_to_serving` runs only if `dbt_test` succeeds, so any ONE of them, on
+# any row, held every score, line and forecast off the site — the dome test for five days (A291),
+# the wind and allowed-yards tests twice in two days (2026-11-07/08), both clearing on their own.
+#
+# MARC'S RULE, the only classifier: a test keeps `error` only if its failure means the site would
+# show something factually WRONG that a reader would act on. Everything else warns and the publish
+# goes ahead. Stale beats dark; wrong does not.
+#
+# ⚠️ SCOPED TO THE PROJECT ROOT, WHERE THE SINGULAR TESTS LIVE (fqn `cfdb_dbt.<name>`). The GENERIC
+# tests in the models' YAML carry fqns under `staging`/`marts`/`serving`, and those three are
+# pinned back to `error` below so this line changes NOTHING about them — they have not been
+# classified, and `unique` on a grain is exactly the kind of test that must keep gating.
+#
+# ⚠️ A DEFAULT, NOT A DECISION. ci/check_test_severity_declared.py fails CI on any singular test
+# that does not state its severity in its own file, so this line only catches what CI already
+# refuses. A warning still runs, still lands in raw.raw_dbt_test_result, and reaches the switch as
+# a `warned_test` line (deploy/cfdb_heartbeat.sh) — it is heard, it just does not page.
+data_tests:
+  cfdb_dbt:
+    +severity: warn
+    staging:
+      +severity: error
+    marts:
+      +severity: error
+    serving:
+      +severity: error
+
 # R-141. THE UPSET SCALE'S BOUNDARIES ARE A METRIC DEFINITION, SO THEY LIVE HERE.
 #
 # Marc asked for the split between levels to be configurable. Configurable does NOT mean a

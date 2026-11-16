@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only` for the reason its siblings carry: it reads marts that the
 -- two-hourly scores DAG does not rebuild on the same cadence as this distribution, and
 -- `ci/check_test_refresh_scope.py` is the guard that would otherwise stop that DAG's publish

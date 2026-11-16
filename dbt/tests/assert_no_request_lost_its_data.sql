@@ -7,6 +7,8 @@
 -- most recent one returned none, something broke. Legitimately-empty endpoints never trip
 -- it, because they never had rows to lose.
 
+{{ config(severity='warn') }}
+
 with successful as (
 
     select endpoint, params, row_count, fetched_at

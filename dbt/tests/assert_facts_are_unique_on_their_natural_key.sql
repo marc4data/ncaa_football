@@ -22,6 +22,8 @@
 -- `conference: null`, carrying an identical rating — so no average moved and every
 -- percentile denominator was one too large. Fixed in stg_team_rating; the test is what
 -- would have caught it on the day the model shipped.
+{{ config(severity='error') }}
+
 {% set fact_keys = [
     ('fct_game',               ['game_id']),
     ('fct_game_team',          ['game_id', 'team_id']),

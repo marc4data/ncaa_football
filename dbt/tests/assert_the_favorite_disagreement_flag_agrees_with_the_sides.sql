@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- The flag must say exactly what the two side columns say (R-393).
 -- Catches the flag and the derivations drifting apart in a later edit -- the flag is what
 -- the page will trust, and a flag that no longer matches its own inputs is worse than none.

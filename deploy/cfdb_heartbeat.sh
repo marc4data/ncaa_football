@@ -141,6 +141,36 @@ PSQL=(psql -w -v ON_ERROR_STOP=1 -tA --no-psqlrc
   order by ranked.dag_id, ranked.task_id
 " || echo "failed|MONITOR.cannot_read_airflow_metadata|0"
 
+# 🚨 A293 (cfdb-main-R-5104) — A FAILURE LINE HAD NO TENSE. "last failed 2d ago" read the same
+# whether the cadence had tried again and failed, or had simply not been scheduled since.
+#
+# `dag_run|<dag>|<secs since newest SUCCESS started>|<secs since newest FINISHED started>|
+#  <1 if one is running or queued>|<secs until next scheduled>`, `-` where there is none.
+#
+# ⚠️ START TIMES, NOT END TIMES, AND THE DIFFERENCE IS THE WHOLE FEATURE: a dag run always ends
+# seconds AFTER its own failed task, so "did a run end since this failure?" is true of the very
+# run that failed. "Did a run START since?" cannot be.
+#
+# ⚠️ A NEW LINE RATHER THAN NEW FIELDS ON `failed|`: the existing watcher parses that shape and
+# would discard an extended one. If this query cannot run the watcher says the tense is unknown.
+"${PSQL[@]}" -d "${CFDB_AIRFLOW_DB:-airflow}" -c "
+  select 'dag_run|' || d.dag_id || '|' ||
+         coalesce(floor(extract(epoch from (now() - r.last_success)))::bigint::text, '-') || '|' ||
+         coalesce(floor(extract(epoch from (now() - r.last_finished)))::bigint::text, '-') || '|' ||
+         case when r.in_flight then '1' else '0' end || '|' ||
+         coalesce(greatest(0, floor(extract(epoch from (d.next_dagrun_create_after - now()))))::bigint::text, '-')
+  from dag d
+  left join lateral (
+    select max(start_date) filter (where state = 'success')             as last_success,
+           max(start_date) filter (where state in ('success', 'failed')) as last_finished,
+           coalesce(bool_or(state in ('running', 'queued')), false)      as in_flight
+    from dag_run
+    where dag_run.dag_id = d.dag_id
+  ) r on true
+  where not d.is_paused and not d.is_stale
+  order by d.dag_id
+" || echo "dag_run|MONITOR.cannot_read_airflow_metadata|-|-|0|-"
+
 # AND WHICH TEST, BECAUSE "dbt_test failed" HAS NEVER ONCE BEEN ENOUGH (R-412).
 #
 # The line above comes from Airflow's metadata database, which knows a task failed and
@@ -481,3 +511,24 @@ fi
   where recency = 1 and status in ('fail', 'error')
   order by failures desc nulls last, unique_id
 " || echo "failed_test|MONITOR.cannot_read_dbt_results|0|0"
+
+# A294 (cfdb-main-R-5131). `warned_test|<name>|<rows>|<seconds ago>` — an assertion at
+# severity `warn` that found rows. dbt records it as status `warn`, which the query above
+# deliberately excludes, so before this line a demoted test was heard by NOTHING the switch
+# reads. A separate head rather than a wider `status in (...)` above, because `failed_test`
+# PAGES and holds the publish-path gate red, and a warning must do neither.
+"${PSQL[@]}" -c "
+  select 'warned_test|' ||
+         split_part(unique_id, '.', 3) || '|' ||
+         coalesce(failures, 0)::text || '|' ||
+         floor(extract(epoch from (now() - generated_at)))::bigint
+  from (
+    select unique_id, failures, generated_at, status,
+           row_number() over (partition by unique_id
+                              order by generated_at desc) as recency
+    from raw.raw_dbt_test_result
+    where generated_at > now() - interval '6 hours'
+  ) ranked
+  where recency = 1 and status = 'warn'
+  order by failures desc nulls last, unique_id
+" || echo "warned_test|MONITOR.cannot_read_dbt_results|0|0"

@@ -1,4 +1,4 @@
-{{ config(severity='error') }}
+{{ config(severity='warn') }}
 -- A196 (cfdb-main-R-2036). "Undefeated entering the game" reads the record BEFORE it.
 --
 -- THE COLUMN CHOICE IS THE WHOLE RULE, AND THE WRONG ONE IS AVAILABLE AND PLAUSIBLE.

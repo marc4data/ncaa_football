@@ -9,6 +9,8 @@
 -- Asserted as agreement between the two columns rather than against is_completed alone,
 -- because that is the property that actually matters: one row must not describe the same
 -- absence two different ways.
+{{ config(severity='warn') }}
+
 select game_id, is_completed, home_points, away_points, final_margin, total_points
 from {{ ref('srv_game') }}
 where (final_margin is null) <> (total_points is null)

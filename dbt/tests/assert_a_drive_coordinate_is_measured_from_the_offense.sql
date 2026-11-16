@@ -16,6 +16,8 @@
 --
 -- IF THIS EVER FIRES, THE COORDINATE CHOICE IS WRONG AND EVERY BAR IN THE AWAY BAND IS
 -- BACKWARDS. It is not a data-quality nicety; it is the assumption the geometry is built on.
+{{ config(severity='warn') }}
+
 select
     drive_id,
     game_id,

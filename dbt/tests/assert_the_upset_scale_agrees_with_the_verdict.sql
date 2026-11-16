@@ -12,6 +12,8 @@
 -- Rewritten twice as the definition moved: first when R-173 made the line the primary basis,
 -- then when R-181 made it the only one and `upset_basis` was dropped. A test whose premise has
 -- moved passes for the wrong reason, so it is repointed rather than left green.
+{{ config(severity='warn') }}
+
 select game_id, upset_level, is_upset_by_line, spread_at_close
 from {{ ref('srv_game') }}
 where is_completed

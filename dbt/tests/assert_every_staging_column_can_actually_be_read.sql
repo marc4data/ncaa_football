@@ -46,7 +46,7 @@
 -- as ancestors, and adding two and a quarter minutes there to re-check a property that only
 -- changes when a MODEL changes would be paying a lot for nothing. The weekly full build is
 -- where it belongs.
-{{ config(tags=['slow_sweep']) }}
+{{ config(severity='warn', tags=['slow_sweep']) }}
 
 {% set staging_models = [
     'stg_api_quota',

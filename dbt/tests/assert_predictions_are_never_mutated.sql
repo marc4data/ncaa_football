@@ -4,6 +4,8 @@
 -- must still be reproducible in January. `model_version` is the content hash of the export
 -- file, so a re-scored model is a DIFFERENT version and lands alongside its predecessor.
 -- Two rows sharing the whole grain would mean a retrain had overwritten history in place.
+{{ config(severity='error') }}
+
 select
     game_id,
     model_name,

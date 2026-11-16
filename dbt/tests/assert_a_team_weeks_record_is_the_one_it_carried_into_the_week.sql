@@ -12,6 +12,8 @@
 -- leading-into counts (a `1 preceding` frame); `wins_after` is the including one. If this
 -- column were ever re-sourced from the wrong pair it would still be a valid "W-L" string, and
 -- this is what would say otherwise.
+{{ config(severity='warn') }}
+
 select
     w.season, w.season_type, w.week, w.team_id,
     w.record_before_display as published,

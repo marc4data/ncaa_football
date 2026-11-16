@@ -1,4 +1,4 @@
-{{ config(tags=['scores_refresh_only']) }}
+{{ config(severity='warn', tags=['scores_refresh_only']) }}
 -- ⚠️ `scores_refresh_only`, NOT UNTAGGED — and the narrow tag is R-672's whole point.
 -- `cfbd_scores_refresh` rebuilds `fct_drive` AND `fct_game` now, so it can satisfy this;
 -- `cfbd_lines_snapshot` rebuilds `fct_game` alone and cannot. Removing the tag outright

@@ -16,6 +16,8 @@
 --
 -- Non-FBS rows are NOT excluded. 11% of the scoreboard is a game against an opponent with
 -- no dim_team row, and those are exactly the rows a name-based derivation gets wrong.
+{{ config(severity='error') }}
+
 select
     game_id,
     season,

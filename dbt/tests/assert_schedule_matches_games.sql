@@ -1,4 +1,4 @@
-{{ config(tags=['scores_refresh_only']) }}
+{{ config(severity='warn', tags=['scores_refresh_only']) }}
 -- 🚨 A283 (cfdb-main-R-4804): THE TAG CHANGED FROM `full_refresh_only` TO `scores_refresh_only`,
 -- AND THE PROJECT'S OWN SCOPE CHECKER CHOSE IT, NOT ME.
 --

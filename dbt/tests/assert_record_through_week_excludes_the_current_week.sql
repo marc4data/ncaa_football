@@ -1,4 +1,4 @@
-{{ config(tags=['scores_refresh_only']) }}
+{{ config(severity='warn', tags=['scores_refresh_only']) }}
 -- 🚨 TAGGED `full_refresh_only` AFTER IT STOPPED THE SITE PUBLISHING. R-672, 2026-09-11.
 --
 -- This compares `fct_team_record_week` against `fct_game`. ⚠️ `cfbd_lines_snapshot`'s

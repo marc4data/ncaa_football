@@ -10,6 +10,8 @@
 -- correlated EXISTS, which was replaced by a join to a DISTINCT set after the first form ran
 -- ten minutes and blocked a live pipeline rebuild. Those two must return the same booleans;
 -- this is what says so.
+{{ config(severity='warn') }}
+
 with actual as (
     select distinct season, player_id from {{ ref('srv_player_stats') }}
 )

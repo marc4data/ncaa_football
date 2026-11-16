@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=['predictions', 'full_refresh_only']) }}
+{{ config(severity='warn', tags=['predictions', 'full_refresh_only']) }}
 -- ⚠️ `full_refresh_only` BECAUSE THE TWO SIDES REFRESH APART. `cfbd_scores_refresh` rebuilds
 -- `dim_model_version` (an ancestor of `srv_game`) and NOT `srv_model_performance`, so inside
 -- that DAG this would compare a fresh dimension against a view hours older and go red for a

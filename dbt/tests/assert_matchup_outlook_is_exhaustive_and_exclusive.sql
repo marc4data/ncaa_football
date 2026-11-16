@@ -17,6 +17,8 @@
 -- team with no deep stats — is honestly unclassifiable, and the delta column beside it is null
 -- for the same reason. Measured on 2026: 4,614 of 7,358 rows, and the outlook is null on exactly
 -- the rows the delta is. What this test forbids is a row that HAS both figures and no outlook.
+{{ config(severity='warn') }}
+
 with expected as (
 
     {% for metric in ['rushing', 'passing', 'total'] %}

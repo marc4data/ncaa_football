@@ -26,6 +26,8 @@
 -- ⚠️ CLAIM 5 IS THE ONE A STAGED BREAK CAN SEE AND THE OTHERS CANNOT. Changing the fraction from
 -- (n - 1) / count to n / count keeps every value inside [0, period), keeps floor() intact for all
 -- but the last play, and moves the whole band off its own reference line. Counts identical.
+{{ config(severity='warn') }}
+
 with p as (
 
     select

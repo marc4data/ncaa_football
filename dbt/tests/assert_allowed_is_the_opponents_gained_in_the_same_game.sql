@@ -15,6 +15,8 @@
 -- the OTHER side's `_allowed`. Pairing a team's `_for` with its own `_allowed` describes ONE TEAM
 -- rather than a matchup." This is that sentence as an assertion.
 
+{{ config(severity='warn') }}
+
 with published as (
 
     select game_id, team_id, team, season, season_type,

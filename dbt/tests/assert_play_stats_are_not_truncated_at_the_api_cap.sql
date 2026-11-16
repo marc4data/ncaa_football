@@ -20,6 +20,8 @@
 -- this repo could fix that. This one passes, and a failure would mean a single game produced
 -- 2,000 stat lines, which is either a genuine outlier worth seeing or the fan-out having
 -- silently reverted to a coarser scope.
+{{ config(severity='warn') }}
+
 select game_id, season, week, count(*) as rows_returned
 from {{ ref('fct_play_stat') }}
 group by game_id, season, week

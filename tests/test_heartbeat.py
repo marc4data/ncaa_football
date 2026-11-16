@@ -576,6 +576,56 @@ def test_the_forced_command_and_the_watcher_agree_on_the_failed_test_shape():
         "R-698 closed, and it cost a twelve-hour game-day publish outage")
 
 
+# === A294: a WARNED assertion is heard and does not page (cfdb-main-R-5131) ================
+
+def test_a_warned_assertion_is_printed_and_does_not_page(monkeypatch, capsys):
+    """A294 made `warn` the default severity. dbt records a warning as status `warn`, which the
+    `failed_test` query excludes, so without its own line a demoted test reached nothing the
+    switch reads. It must be HEARD — named, with its row count — and must NOT page, because a
+    page is an email and the whole point of `warn` is that the publish went ahead."""
+    module = _watcher()
+    fresh = "\n".join([f"{name}|60" for name in module.CADENCES]
+                      + [f"{head}|0|0|-" for head in module.OUTCOME_LINES])
+    _fake_ssh(monkeypatch, module, fresh + "\nwarned_test|assert_the_wind_direction_reaches_the_page_intact|123|600\n")
+    reading = module.read_ages("host")
+    ages, failures, failed_tests, _outcomes = reading
+    assert failed_tests == {}, "a warning must not enter the page set"
+    assert reading.warned == {"assert_the_wind_direction_reaches_the_page_intact": (123, 600)}
+    code = module.main(["host"])
+    printed = capsys.readouterr().out
+    assert "WARNED  assert_the_wind_direction_reaches_the_page_intact: 123 row(s)" in printed
+    assert "::warning::" in printed
+    # The exit code IS the page. Every beat fresh, every outcome clean, one warning: exit 0.
+    assert code == 0, printed
+
+
+def test_the_gate_does_not_go_red_on_a_warning():
+    """Run the real gate on a fresh payload carrying a warning: it must read GREEN.
+
+    Staged break, verified red: routing `warned_test` into `failed_tests` in the watcher's
+    parser turns this RED, because the gate reads the same parser."""
+    from pathlib import Path as _Path
+    import importlib.util as _u
+    import sys as _sys
+    root = _Path(__file__).resolve().parents[1]
+    _sys.path.insert(0, str(root / "ci"))
+    spec = _u.spec_from_file_location("check_publish_path", root / "ci" / "check_publish_path.py")
+    gate = _u.module_from_spec(spec)
+    spec.loader.exec_module(gate)
+    fresh = "\n".join(f"{name}|60" for name in gate.CADENCES)
+    state, reasons = gate.verdict(fresh + "\nwarned_test|assert_the_wind_direction_reaches_the_page_intact|123|600\n")
+    assert state == gate.GREEN, reasons
+
+
+def test_the_forced_command_emits_warnings_on_their_own_line():
+    from pathlib import Path as _Path
+    root = _Path(__file__).resolve().parents[1]
+    script = (root / "deploy" / "cfdb_heartbeat.sh").read_text()
+    code = "\n".join(ln for ln in script.splitlines() if not ln.lstrip().startswith("#"))
+    assert "'warned_test|'" in code and "status = 'warn'" in code
+    assert "status in ('fail', 'error')" in code, "failed_test must still exclude warnings"
+
+
 # === A180: the alarm must not forget a WEEKLY failure (cfdb-main-R-1861) ====================
 
 def test_the_alarm_still_reports_a_weekly_failure_seven_hours_later():
@@ -924,11 +974,12 @@ def test_every_outcome_line_the_monitor_emits_is_parsed_by_the_watcher():
     emitted = set(re.findall(r"select\s+'([a-z_]+)\|'", code))
     assert emitted, "found no outcome lines in the script — this test is not reading it"
 
-    # ⚠️ TWO EMITTED HEADS ARE **PROCESS** LINES, NOT OUTCOME LINES, AND THEY HAVE THEIR OWN
+    # ⚠️ THREE EMITTED HEADS ARE **PROCESS** LINES, NOT OUTCOME LINES, AND THEY HAVE THEIR OWN
     # BRANCHES. `failed|<dag>.<task>|<seconds>` and `failed_test|<name>|<rows>|<seconds>` say
     # the machinery broke; the outcome lines say the SITE is wrong. They are named here rather
     # than matched loosely, so a genuinely new head still fails this test.
-    PROCESS_HEADS = {"failed", "failed_test"}
+    # dag_run: A293, each cadence's runs · warned_test: A294, an assertion at severity warn
+    PROCESS_HEADS = {"failed", "failed_test", "dag_run", "warned_test"}
     for head in PROCESS_HEADS:
         assert f'"{head}"' in _watcher_source(), (
             f"{head} is emitted but the watcher has no branch for it")

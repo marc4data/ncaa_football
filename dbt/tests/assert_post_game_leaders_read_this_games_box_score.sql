@@ -1,4 +1,4 @@
-{{ config(tags=['full_refresh_only']) }}
+{{ config(severity='warn', tags=['full_refresh_only']) }}
 -- 🚨 TAGGED BY A185 (cfdb-main-R-1913), AND THE STRADDLE IS THIS ROUND'S OWN DOING.
 -- Putting `srv_player_play` on the game-day selector pulled `dim_athlete` in with it, so
 -- this test began reading a FRESH `dim_athlete` against a `fct_player_game_stat` that the

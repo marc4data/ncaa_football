@@ -10,6 +10,8 @@
 -- Reconciliation (data quality rule #4): a team's W-L-T must account for every
 -- game it played. Returns offending rows; dbt fails the test if any come back.
 
+{{ config(severity='warn') }}
+
 select
     team_season_key,
     games_played,

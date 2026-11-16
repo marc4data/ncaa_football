@@ -11,6 +11,8 @@
 -- THE FIRST VERSION OF THIS TEST ASSERTED THE WRONG PREMISE — that a team plays at most one
 -- game a week, so each delta had to be 0 or 1. It returned 1,858 rows, and they were real:
 -- 823 team-weeks with two wins and 26 with three. Weeks are CFBD's buckets, not a guarantee.
+{{ config(severity='warn') }}
+
 with ordered as (
 
     select

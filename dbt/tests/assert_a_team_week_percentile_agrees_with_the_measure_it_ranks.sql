@@ -16,6 +16,8 @@
 -- population they were computed over (FBS, at least one counted game), so the join is scoped
 -- to rows that carry one — comparing a null to a null would fire on nothing and prove nothing
 -- (R-760).
+{{ config(severity='warn') }}
+
 select
     a.season, a.season_type, a.week,
     a.team_display                     as team_a,

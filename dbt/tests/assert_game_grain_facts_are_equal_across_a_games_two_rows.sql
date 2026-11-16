@@ -16,6 +16,8 @@
 -- brace.
 --
 -- Zero violations across 110,879 games on 2026-09-05.
+{{ config(severity='warn') }}
+
 select
     game_id,
     count(distinct venue_display)    as venues,

@@ -3,6 +3,8 @@
 -- The sign test above catches an inversion. This catches the subtler case: a margin that
 -- happens to have the right sign but is not actually away-minus-home — a rounding change,
 -- a points column swapped upstream, or a model exporting its own definition of margin.
+{{ config(severity='error') }}
+
 select
     game_id,
     model_name,

@@ -1,4 +1,4 @@
-{{ config(severity='error', tags=[]) }}
+{{ config(severity='warn', tags=[]) }}
 -- 🚨 `full_refresh_only` REMOVED BY A185 (cfdb-main-R-1912). The tag means *no gated DAG
 -- rebuilds both sides*, and that stopped being true the moment `cfbd_scores_refresh` began
 -- fetching drives, plays and `metrics/wp` on the game-day cadence and building their models.

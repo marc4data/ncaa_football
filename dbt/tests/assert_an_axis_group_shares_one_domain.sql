@@ -25,6 +25,8 @@
 -- 📊 AND IT IS NOT VACUOUS: `game_points` holds two members today, so the `having` clause has a
 -- group with more than one row to be false about. A group of one cannot fail it, which is
 -- correct — a metric on its own axis has nothing to disagree with.
+{{ config(severity='warn') }}
+
 select
     axis_group,
     count(distinct metric)     as metrics_in_group,

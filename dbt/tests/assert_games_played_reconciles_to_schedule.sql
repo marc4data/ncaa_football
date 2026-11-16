@@ -1,4 +1,4 @@
-{{ config(tags=['scores_refresh_only']) }}
+{{ config(severity='warn', tags=['scores_refresh_only']) }}
 -- 🚨 A283 (cfdb-main-R-4804): `full_refresh_only` -> `scores_refresh_only`, named by
 -- `ci/check_test_refresh_scope.py` rather than chosen by me:
 --

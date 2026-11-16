@@ -20,6 +20,8 @@
 -- ⚠️ IT IS NOT THE SAME ASSERTION AS "THE OUTLIERS ARE EXCLUDED". A frame may legitimately hold
 -- every value — when outlier_count is 0 the whisker IS the maximum and the frame is unchanged —
 -- so this test passes on an untightened axis and fails only on one built over a detached tail.
+{{ config(severity='warn') }}
+
 with f as (
     select season, season_type, week, metric,
            axis_min, axis_max, axis_step,
